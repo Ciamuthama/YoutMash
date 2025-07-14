@@ -1,4 +1,4 @@
-package com.example.youtmash
+package com.ciamuthama.youtmash
 
 
 import android.os.Bundle
@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -15,8 +16,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
@@ -26,6 +29,7 @@ import com.google.api.client.http.HttpTransport
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.youtube.YouTube
+import com.google.gson.annotations.SerializedName
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 
@@ -35,49 +39,61 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.GET
+import retrofit2.http.Query
 
+
+data class Clip(
+    @SerializedName("videoId") val videoId: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("highlightTimestamp") val highlightTimestamp: Int
+)
+
+data class ReelResponse(
+    @SerializedName("clip") val clips: List<Clip>
+)
+interface ReelApiService {
+    @GET("/generate-reel")
+    suspend fun generateReel(@Query("q") query: String): ReelResponse
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             YoutMashTheme {
-
-                    MainScreen(
-
-                )
+                    MainScreen( Modifier.background(Color.Black) )
                 }
             }
         }
     }
 
-
-
-
-
-
-
-
 @Composable
-fun MainScreen() {
-    var videoIdList by remember { mutableStateOf<List<String>>(emptyList()) }
+fun MainScreen(modifier: Modifier = Modifier ) {
+    var clipList by remember { mutableStateOf<List<Clip>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        val results = searchYouTube("Best Places in kenya")
-        if (results.isNotEmpty()){
-            videoIdList = results
-
+        // We call the updated searchYouTube function
+        val results = searchYouTube("maasai mara")
+        if (results.isNotEmpty()) {
+            clipList = results
         }
     }
 
-    YouTubePlayer(videoIds = videoIdList)
+    // Pass the full list of clips to the player
+    YouTubePlayer(clips = clipList, modifier = modifier)
 
 }
 
 
 @Composable
-fun YouTubePlayer(videoIds: List<String>){
+fun YouTubePlayer(clips: List<Clip>, modifier: Modifier = Modifier){
+    val updatedClips by rememberUpdatedState(clips)
+
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
@@ -85,9 +101,9 @@ fun YouTubePlayer(videoIds: List<String>){
                 addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
                     private var currentVideoIndex = 0
                     override fun onReady(youTubePlayer: com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer){
-                        if(videoIds.isNotEmpty()){
-                            currentVideoIndex = 0
-                            youTubePlayer.loadVideo(videoIds[currentVideoIndex], 0f)
+                        if (currentVideoIndex < updatedClips.size) {
+                            val nextClip = updatedClips[currentVideoIndex]
+                            youTubePlayer.loadVideo(nextClip.videoId, nextClip.highlightTimestamp.toFloat())
                         }
                     }
 
@@ -97,8 +113,10 @@ fun YouTubePlayer(videoIds: List<String>){
                     ) {
                         if (state == PlayerConstants.PlayerState.ENDED) {
                             currentVideoIndex++
-                            if(currentVideoIndex < videoIds.size){
-                                youTubePlayer.loadVideo(videoIds[currentVideoIndex], 0f)
+                            if (currentVideoIndex < clips.size) {
+                                // FIX 2: Autoplay the NEXT video using its specific timestamp
+                                val nextClip = clips[currentVideoIndex]
+                                youTubePlayer.loadVideo(nextClip.videoId, nextClip.highlightTimestamp.toFloat())
                             }
                         }
                     }
@@ -111,10 +129,11 @@ fun YouTubePlayer(videoIds: List<String>){
         },
         update = { view ->
 
-            if (videoIds.isNotEmpty()) {
+            if (clips.isNotEmpty()) {
                 view.getYouTubePlayerWhenReady(object : com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.YouTubePlayerCallback {
                     override fun onYouTubePlayer(youTubePlayer: com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer) {
-                        youTubePlayer.loadVideo(videoIds.first(), 0f)
+                        val firstClip = clips.first()
+                        youTubePlayer.loadVideo(firstClip.videoId, firstClip.highlightTimestamp.toFloat())
                     }
                 })
             }
@@ -123,38 +142,30 @@ fun YouTubePlayer(videoIds: List<String>){
 }
 
 
-private suspend fun searchYouTube(query: String): List<String> {
-    return withContext(Dispatchers.IO)  {
-        try {
-            val transport = NetHttpTransport()
-            val jsonFactory = GsonFactory.getDefaultInstance()
+private suspend fun searchYouTube(query: String): List<Clip> {
+   val baseUrl = "http://192.168.31.176:8080/"
+    val okHttpClient = OkHttpClient.Builder()
+        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
 
-            val youTube = YouTube.Builder(transport, jsonFactory, null)
-                .setApplicationName("YoutMash")
-                .build()
-            val search = youTube.search().list(listOf("id","snippet").joinToString(",")).apply {
-                key = BuildConfig.YOUTUBE_API_KEY
-                q = query
-                type = "video"
-                maxResults = 5
-                fields = "items(id/videoId,snippet/title)"
-            }
+    val retrofit = Retrofit.Builder()
+        .baseUrl(baseUrl)
+        .client(okHttpClient)
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
 
-            val response = search.execute()
-            val videoIds = response.items?.map { it.id.videoId } ?: emptyList()
-            Log.d("searchYouTube", "Video IDs: $videoIds")
-            videoIds
-        } catch (e: Exception) {
-            Log.e("searchYouTube", "Error searching YouTube", e)
-            emptyList<String>()
-        }
+    val apiServices = retrofit.create(ReelApiService::class.java)
+
+    return try {
+        val reelResponse = apiServices.generateReel(query)
+        val clips = reelResponse.clips
+        Log.d("BackendSearch", "Successfully fetched clips from backend: $clips")
+        clips
+    } catch (e: Exception) {
+        Log.e("BackendSearch", "Error fetching from backend", e)
+        emptyList()
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    YoutMashTheme {
-        MainScreen()
-    }
-}

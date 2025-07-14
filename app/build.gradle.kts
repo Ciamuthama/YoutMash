@@ -15,11 +15,11 @@ if (localPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.example.youtmash"
+    namespace = "com.ciamuthama.youtmash"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.youtmash"
+        applicationId = "com.ciamuthama.youtmash"
         minSdk = 28
         targetSdk = 35
         versionCode = 1
@@ -87,6 +87,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.api-client:google-api-client-android:1.34.0")
     implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
